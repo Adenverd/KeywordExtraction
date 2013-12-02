@@ -1,3 +1,4 @@
 .idea/
 Train.csv
 lucene-4.6.0/
+*.swp
