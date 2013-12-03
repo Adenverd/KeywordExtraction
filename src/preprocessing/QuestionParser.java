@@ -21,6 +21,7 @@ public class QuestionParser {
 
     public Question parse() throws IOException {
         Question question = new Question();
+
         String id = parseField();
         question.id = Integer.parseInt(id);
 
@@ -32,6 +33,10 @@ public class QuestionParser {
 
         String tags = parseField();
         question.tags = tags;
+
+        if(id.isEmpty() || title.isEmpty() || text.isEmpty() || tags.isEmpty()){
+            return null;
+        }
 
         return question;
     }
@@ -55,12 +60,24 @@ public class QuestionParser {
         }
 
         while(inField){
+            char c;
+            try{
+                c = (char) bufferedReader.read();
+            } catch(IOException e){
+                return stringBuilder.toString();
+            }
 
-            char c = (char) bufferedReader.read();
             if(c == '\"'){
                 openQuote = !openQuote;
                 if(!openQuote){
-                    char c2 = (char) bufferedReader.read();
+                    char c2;
+                    try{
+                        c2 = (char) bufferedReader.read();
+                    }
+                    catch(IOException e){
+                        return stringBuilder.toString();
+                    }
+
                     if(c2 == ',' || c2 == '\r'){
                         inField = false;
                     }

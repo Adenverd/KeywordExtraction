@@ -22,13 +22,15 @@ import java.util.Set;
 
 public class Index {
 
-    public static double RAM_BUFFER_SIZE_MB = 8192;
-    public static int NUM_QUESTIONS = 6034195;
+    public static double RAM_BUFFER_SIZE_MB = 4096;
+    public static int BATCH_SIZE = 100000;
+    public static int NUM_QUESTIONS = 603419; //6034195
 
     protected File indexFile;
     protected Directory directory;
     protected Analyzer analyzer;
     protected IndexWriterConfig indexWriterConfig;
+    protected IndexWriter indexWriter;
 
     public static void main(String[] args) throws IOException{
         File trainFile = new File(args[0]);
@@ -43,14 +45,16 @@ public class Index {
 
         QuestionParser questionParser = new QuestionParser(trainFile);
         Set<Question> questions = new HashSet<Question>();
+        Index index = new Index(outputDir, false);
 
         double startTime = System.currentTimeMillis();
-        for(int i = 0; i < NUM_QUESTIONS; i++){
-            questions.add(questionParser.parse());
+        for(int i = 0; i <= NUM_QUESTIONS/BATCH_SIZE; i++){
+            for(int j = 0; j < BATCH_SIZE; j++){
+                questions.add(questionParser.parse());
+            }
+            index.index(questions);
+            questions.clear();
         }
-
-        Index index = new Index(outputDir);
-        index.index(questions, false);
         System.out.println("Indexing took " + (System.currentTimeMillis() - startTime) + "ms");
     }
 
@@ -58,23 +62,13 @@ public class Index {
      * Creates a new Index.
      * @param indexOutputDirectory Location for Lucene to store the index
      */
-    public Index(File indexOutputDirectory){
+    public Index(File indexOutputDirectory, boolean memFlag) throws IOException{
         indexFile = indexOutputDirectory;
         analyzer = new StandardAnalyzer(Version.LUCENE_46);
         indexWriterConfig = new IndexWriterConfig(Version.LUCENE_46, analyzer);
         indexWriterConfig.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND);
         indexWriterConfig.setRAMBufferSizeMB(RAM_BUFFER_SIZE_MB);
-    }
 
-    /***
-     * Adds a set of Questions to the index.
-     * @param questions
-     * @param memFlag True to index in memory, false otherwise.
-     * @return A set of Questions that were not properly indexed.
-     * @throws IOException
-     */
-    public Set<Question> index(Set<Question> questions, boolean memFlag) throws IOException {
-        Set<Question> failedQuestions = new HashSet<Question>();
         if(memFlag){
             directory = new MMapDirectory(indexFile);
         }
@@ -82,7 +76,17 @@ public class Index {
             directory = FSDirectory.open(indexFile);
         }
 
-        IndexWriter indexWriter = new IndexWriter(directory, indexWriterConfig);
+        indexWriter = new IndexWriter(directory, indexWriterConfig);
+    }
+
+    /***
+     * Adds a set of Questions to the index.
+     * @param questions
+     * @return A set of Questions that were not properly indexed.
+     * @throws IOException
+     */
+    public Set<Question> index(Set<Question> questions) throws IOException {
+        Set<Question> failedQuestions = new HashSet<Question>();
 
         for(Question question : questions){
             try{
@@ -129,11 +133,14 @@ public class Index {
 
         try{
             indexWriter.commit();
-            indexWriter.close();
         } catch (Exception e){
             System.out.println("Failed to close IndexWriter: " + e.getMessage());
         }
 
         return failedQuestions;
+    }
+
+    public void close() throws IOException{
+        indexWriter.close();
     }
 }
