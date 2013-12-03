@@ -1,10 +1,12 @@
 package preprocessing;
 
+import java.util.List;
+
 public class Question {
     public int id;
     public String title;
     public String text;
-    public String tags; //TODO: split these
+    public String tags;
 
     public Question(){
 

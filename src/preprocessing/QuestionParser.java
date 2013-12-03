@@ -4,16 +4,19 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
-public class InputParser {
+public class QuestionParser {
     private File input;
     private FileReader inputFileReader;
     private BufferedReader bufferedReader;
 
-    public InputParser(File input) throws IOException {
+    public QuestionParser(File input) throws IOException {
         this.input = input;
         this.inputFileReader = new FileReader(this.input);
         this.bufferedReader = new BufferedReader(this.inputFileReader);
+        bufferedReader.readLine(); //skip the first line of csv info
     }
 
     public Question parse() throws IOException {
@@ -76,4 +79,15 @@ public class InputParser {
         }
         return stringBuilder.toString();
     }
+
+//    private static List<String> parseTags(String tags){
+//        List<String> tagList = new ArrayList<String>();
+//
+//        String[] tagArray = tags.split(" ");
+//        for(String t : tagArray){
+//            tagList.add(t);
+//        }
+//
+//        return tagList;
+//    }
 }
