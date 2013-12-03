@@ -22,6 +22,9 @@ import java.util.Set;
 
 public class Index {
 
+    public static double RAM_BUFFER_SIZE_MB = 8192;
+    public static int NUM_QUESTIONS = 6034195;
+
     protected File indexFile;
     protected Directory directory;
     protected Analyzer analyzer;
@@ -42,7 +45,7 @@ public class Index {
         Set<Question> questions = new HashSet<Question>();
 
         double startTime = System.currentTimeMillis();
-        for(int i = 0; i < 100000; i++){
+        for(int i = 0; i < NUM_QUESTIONS; i++){
             questions.add(questionParser.parse());
         }
 
@@ -60,7 +63,7 @@ public class Index {
         analyzer = new StandardAnalyzer(Version.LUCENE_46);
         indexWriterConfig = new IndexWriterConfig(Version.LUCENE_46, analyzer);
         indexWriterConfig.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND);
-        indexWriterConfig.setRAMBufferSizeMB(8192);
+        indexWriterConfig.setRAMBufferSizeMB(RAM_BUFFER_SIZE_MB);
     }
 
     /***
