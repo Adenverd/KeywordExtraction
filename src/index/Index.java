@@ -1,5 +1,6 @@
 package index;
 
+import comparison.Ranker;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
@@ -17,9 +18,7 @@ import preprocessing.QuestionParser;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 public class Index {
 
@@ -120,20 +119,41 @@ public class Index {
 
     public List<String> getTags(Question question, double scoreThreshold) throws IOException{
         MoreLikeThis moreLikeThis = new MoreLikeThis(indexReader);
-        moreLikeThis.setFieldNames(null);
-        Query query = moreLikeThis.like(indexQuery(question));
+        moreLikeThis.setFieldNames(new String[] {"title", "body"}); //search only using title and body fields
+        int queryDocId = indexQuery(question); //index the query question and get the Lucene docId
+        Query query = moreLikeThis.like(queryDocId); //construct the query
+
+        //TODO: delete queryDocId from index before performing query
 
         TopScoreDocCollector topScoreDocCollector = TopScoreDocCollector.create(NUM_TOP_DOCS, true);
 
+        //search
         indexSearcher.search(query, topScoreDocCollector);
 
         ScoreDoc[] hits = topScoreDocCollector.topDocs().scoreDocs;
 
+        Ranker<String> ranker = new Ranker<String>();
+
         for (int i = 0; i<hits.length; i++){
             Document doc = indexSearcher.doc(hits[i].doc);
-            String tags = doc.get("tags");
-            Ranker ranker = new Ranker();
+            String[] tags = doc.get("tags").split(" "); //get the tags and split on
+            //increase the score for this tag by the score of the document
+            for(String tag : tags){
+                ranker.increase(tag, (double)hits[i].score/hits[0].score);
+            }
         }
+
+        //if a tag's score is above the specified score threshold, add it to a list to return
+        List<String> tags = new ArrayList<String>();
+        Map<String, Double> tagScores = ranker.getMap();
+
+        for(Map.Entry<String, Double> tagScore : tagScores.entrySet()){
+            if(tagScore.getValue() >= scoreThreshold){
+                tags.add(tagScore.getKey());
+            }
+        }
+
+        return tags;
     }
 
     private Document buildDocument(Question question){
@@ -174,6 +194,12 @@ public class Index {
         return doc;
     }
 
+    /***
+     * Indexes a query and returns the docId. Be sure to delete this docId if it is a query Question.
+     * @param question
+     * @return
+     * @throws IOException
+     */
     private int indexQuery(Question question) throws IOException {
         Document doc = buildDocument(question);
         indexWriter.addDocument(doc);
