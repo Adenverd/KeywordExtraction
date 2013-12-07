@@ -20,58 +20,48 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
-public class Index {
-
-    public static double RAM_BUFFER_SIZE_MB = 4096;
-    public static int BATCH_SIZE = 100000;
-    public static int NUM_QUESTIONS = 603419; //6034195
-    public static int NUM_TOP_DOCS = 1000;
-
+public class QuestionIndex {
     protected File indexFile;
     protected Directory directory;
     protected Analyzer analyzer;
     protected IndexWriterConfig indexWriterConfig;
     protected IndexWriter indexWriter;
     protected IndexReader indexReader;
-    protected IndexSearcher indexSearcher;
 
-    public static void main(String[] args) throws IOException{
-        File trainFile = new File(args[0]);
-        File outputDir = new File(args[1]);
-
-        if(!trainFile.exists()){
+    public Set<Question> buildIndex(File questionsFile, int numQuestions, int batchSize) throws IOException{
+        if(!questionsFile.exists()){
             throw new RuntimeException("Training file doesn't exist");
         }
-        if(!outputDir.isDirectory() || !outputDir.exists()){
-            throw new RuntimeException("Output directory doesn't exist");
-        }
 
-        QuestionParser questionParser = new QuestionParser(trainFile);
+        QuestionParser questionParser = new QuestionParser(questionsFile);
         Set<Question> questions = new HashSet<Question>();
-        Index index = new Index(outputDir, false);
+        Set<Question> failedQuestions = new HashSet<Question>();
 
         double startTime = System.currentTimeMillis();
-        for(int i = 0; i <= NUM_QUESTIONS/BATCH_SIZE; i++){
-            for(int j = 0; j < BATCH_SIZE; j++){
+        for(int i = 0; i <= numQuestions/batchSize; i++){
+            for(int j = 0; j < batchSize; j++){
                 questions.add(questionParser.parse());
             }
-            index.index(questions);
+            failedQuestions.addAll(index(questions));
             questions.clear();
         }
-        System.out.println("Indexing took " + (System.currentTimeMillis() - startTime) + "ms");
-        index.closeIndexWriter();
+
+        return failedQuestions;
     }
 
     /***
-     * Creates a new Index.
+     * Creates a new QuestionIndex.
      * @param indexOutputDirectory Location for Lucene to store the index
      */
-    public Index(File indexOutputDirectory, boolean memFlag) throws IOException{
+    public QuestionIndex(File indexOutputDirectory, boolean memFlag, double ramBufferSizeMb) throws IOException{
+        if(!indexOutputDirectory.isDirectory() || !indexOutputDirectory.exists()){
+            throw new RuntimeException("Output directory doesn't exist");
+        }
         indexFile = indexOutputDirectory;
         analyzer = new StandardAnalyzer(Version.LUCENE_46);
         indexWriterConfig = new IndexWriterConfig(Version.LUCENE_46, analyzer);
         indexWriterConfig.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND);
-        indexWriterConfig.setRAMBufferSizeMB(RAM_BUFFER_SIZE_MB);
+        indexWriterConfig.setRAMBufferSizeMB(ramBufferSizeMb);
 
         if(memFlag){
             directory = new MMapDirectory(indexFile);
@@ -80,9 +70,7 @@ public class Index {
             directory = FSDirectory.open(indexFile);
         }
 
-        indexWriter = new IndexWriter(directory, indexWriterConfig);
-        indexReader = DirectoryReader.open(directory);
-        indexSearcher = new IndexSearcher(indexReader);
+        openIndexWriter();
     }
 
     /***
@@ -91,13 +79,15 @@ public class Index {
      * @return A set of Questions that were not properly indexed.
      * @throws IOException
      */
-    public Set<Question> index(Set<Question> questions) throws IOException {
+    private Set<Question> index(Set<Question> questions) throws IOException {
         Set<Question> failedQuestions = new HashSet<Question>();
+        int counter = 0;
 
         for(Question question : questions){
             try{
                 Document doc = buildDocument(question);
                 indexWriter.addDocument(doc);
+                counter++;
             } catch (Exception e){
                 System.out.println("Failed to add Question " + question.id);
                 failedQuestions.add(question);
@@ -113,19 +103,19 @@ public class Index {
         return failedQuestions;
     }
 
-    public void closeIndexWriter() throws IOException{
-        indexWriter.close();
-    }
+    public List<String> getTags(Question question, int numTopDocs, double scoreThreshold) throws IOException{
+        openIndexReader();
+        IndexSearcher indexSearcher = new IndexSearcher(indexReader);
 
-    public List<String> getTags(Question question, double scoreThreshold) throws IOException{
         MoreLikeThis moreLikeThis = new MoreLikeThis(indexReader);
         moreLikeThis.setFieldNames(new String[] {"title", "body"}); //search only using title and body fields
         int queryDocId = indexQuery(question); //index the query question and get the Lucene docId
         Query query = moreLikeThis.like(queryDocId); //construct the query
 
-        //TODO: delete queryDocId from index before performing query
+        //Now that query is constructed, delete query question from index
+        deleteFromIndex(question);
 
-        TopScoreDocCollector topScoreDocCollector = TopScoreDocCollector.create(NUM_TOP_DOCS, true);
+        TopScoreDocCollector topScoreDocCollector = TopScoreDocCollector.create(numTopDocs, true);
 
         //search
         indexSearcher.search(query, topScoreDocCollector);
@@ -134,12 +124,13 @@ public class Index {
 
         Ranker<String> ranker = new Ranker<String>();
 
+        //calculate scores for tags of similar documents
         for (int i = 0; i<hits.length; i++){
             Document doc = indexSearcher.doc(hits[i].doc);
             String[] tags = doc.get("tags").split(" "); //get the tags and split on
             //increase the score for this tag by the score of the document
             for(String tag : tags){
-                ranker.increase(tag, (double)hits[i].score/hits[0].score);
+                ranker.increase(tag, (double)hits[i].score);
             }
         }
 
@@ -147,12 +138,13 @@ public class Index {
         List<String> tags = new ArrayList<String>();
         Map<String, Double> tagScores = ranker.getMap();
 
-        for(Map.Entry<String, Double> tagScore : tagScores.entrySet()){
-            if(tagScore.getValue() >= scoreThreshold){
-                tags.add(tagScore.getKey());
+        for(String tag : tagScores.keySet()){
+            if(ranker.getProportion(tag) >= scoreThreshold){
+                tags.add(tag);
             }
         }
 
+        closeIndexReader();
         return tags;
     }
 
@@ -183,25 +175,28 @@ public class Index {
         bodyFieldType.setOmitNorms(false);
         doc.add(new Field("body", question.text, bodyFieldType));
 
-        FieldType tagsFieldType = new FieldType();
-        tagsFieldType.setIndexed(true);
-        tagsFieldType.setStored(true);
-        tagsFieldType.setTokenized(false);
-        tagsFieldType.setStoreTermVectors(true);
-        tagsFieldType.setOmitNorms(true);
-        doc.add(new Field("tags", question.tags, tagsFieldType));
+        if(question.tags!= null && !question.tags.equals("")){
+            FieldType tagsFieldType = new FieldType();
+            tagsFieldType.setIndexed(true);
+            tagsFieldType.setStored(true);
+            tagsFieldType.setTokenized(false);
+            tagsFieldType.setStoreTermVectors(true);
+            tagsFieldType.setOmitNorms(true);
+            doc.add(new Field("tags", question.tags, tagsFieldType));
+        }
 
         return doc;
     }
 
     /***
-     * Indexes a query and returns the docId. Be sure to delete this docId if it is a query Question.
+     * Indexes a query and returns the docId because MoreLikeThis is fucking stupid that way. Be sure to delete this docId if it is a query Question.
      * @param question
      * @return
      * @throws IOException
      */
     private int indexQuery(Question question) throws IOException {
         Document doc = buildDocument(question);
+        IndexSearcher indexSearcher = new IndexSearcher(indexReader);
         indexWriter.addDocument(doc);
         indexWriter.commit();
 
@@ -209,4 +204,27 @@ public class Index {
         return results.scoreDocs[0].doc;
     }
 
+    private void deleteFromIndex(Question question) throws IOException{
+        Term term = new Term("id", String.valueOf(question.id));
+        closeIndexReader();
+        indexWriter.deleteDocuments(term);
+        indexWriter.commit();
+        openIndexReader();
+    }
+
+    public void closeIndexWriter() throws IOException{
+        indexWriter.close();
+    }
+
+    private void openIndexWriter() throws IOException{
+        indexWriter = new IndexWriter(directory, indexWriterConfig);
+    }
+
+    private void closeIndexReader() throws IOException{
+        indexReader.close();
+    }
+
+    private void openIndexReader() throws IOException{
+        indexReader = DirectoryReader.open(directory);
+    }
 }
