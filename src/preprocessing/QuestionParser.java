@@ -23,7 +23,7 @@ public class QuestionParser {
         Question question = new Question();
 
         String id = parseField();
-        question.id = Integer.parseInt(id);
+        question.id = id == null? -1 : Integer.parseInt(id);
 
         String title = parseField();
         question.title = title;
@@ -34,7 +34,7 @@ public class QuestionParser {
         String tags = parseField();
         question.tags = tags;
 
-        if(id.isEmpty() || title.isEmpty() || text.isEmpty() || tags.isEmpty()){
+        if(id == null || id.isEmpty() || title == null || title.isEmpty() || text == null|| text.isEmpty() || tags == null || tags.isEmpty()){
             return null;
         }
 

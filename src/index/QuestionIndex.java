@@ -104,12 +104,12 @@ public class QuestionIndex {
     }
 
     public List<String> getTags(Question question, int numTopDocs, double scoreThreshold) throws IOException{
+        int queryDocId = indexQuery(question); //index the query question and get the Lucene docId
         openIndexReader();
-        IndexSearcher indexSearcher = new IndexSearcher(indexReader);
 
         MoreLikeThis moreLikeThis = new MoreLikeThis(indexReader);
         moreLikeThis.setFieldNames(new String[] {"title", "body"}); //search only using title and body fields
-        int queryDocId = indexQuery(question); //index the query question and get the Lucene docId
+
         Query query = moreLikeThis.like(queryDocId); //construct the query
 
         //Now that query is constructed, delete query question from index
@@ -118,6 +118,7 @@ public class QuestionIndex {
         TopScoreDocCollector topScoreDocCollector = TopScoreDocCollector.create(numTopDocs, true);
 
         //search
+        IndexSearcher indexSearcher = new IndexSearcher(indexReader);
         indexSearcher.search(query, topScoreDocCollector);
 
         ScoreDoc[] hits = topScoreDocCollector.topDocs().scoreDocs;
@@ -152,7 +153,7 @@ public class QuestionIndex {
         Document doc = new Document();
 
         FieldType idFieldType = new FieldType();
-        idFieldType.setIndexed(false);
+        idFieldType.setIndexed(true);
         idFieldType.setStored(true);
         idFieldType.setTokenized(false);
         idFieldType.setStoreTermVectors(false);
@@ -195,12 +196,17 @@ public class QuestionIndex {
      * @throws IOException
      */
     private int indexQuery(Question question) throws IOException {
+        closeIndexReader();
+
         Document doc = buildDocument(question);
-        IndexSearcher indexSearcher = new IndexSearcher(indexReader);
         indexWriter.addDocument(doc);
         indexWriter.commit();
 
-        TopDocs results = indexSearcher.search(new TermQuery(new Term("id", String.valueOf(question.id))), 1);
+        openIndexReader();
+
+        IndexSearcher indexSearcher = new IndexSearcher(indexReader);
+        TopDocs results = indexSearcher.search(new TermQuery(new Term("id", String.valueOf(question.id))), 100);
+//        TopDocs results = indexSearcher.search(new TermQuery(new Term("title", "print")), 1);
         return results.scoreDocs[0].doc;
     }
 
@@ -213,7 +219,9 @@ public class QuestionIndex {
     }
 
     public void closeIndexWriter() throws IOException{
-        indexWriter.close();
+        if (indexWriter != null){
+            indexWriter.close();
+        }
     }
 
     private void openIndexWriter() throws IOException{
@@ -221,7 +229,9 @@ public class QuestionIndex {
     }
 
     private void closeIndexReader() throws IOException{
-        indexReader.close();
+        if(indexReader != null){
+            indexReader.close();
+        }
     }
 
     private void openIndexReader() throws IOException{

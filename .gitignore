@@ -4,5 +4,6 @@ lucene-4.6.0/
 *.swp
 testIndex/
 IndexFiles/
+indexDir/
 out/
 
